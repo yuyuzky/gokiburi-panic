@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a1118" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ゴキブリパニック" />
+  <title>ゴキブリパニック！〜3D非対称対戦アクション〜</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <div id="game-container">
+    <!-- Three.js レンダリング用コンテナ -->
+    <div id="canvas-mount" class="w-full h-full"></div>
+
+    <!-- ダメージ・毒（蓄積/発症）・飢餓ビネット -->
+    <div id="damage-vignette"></div>
+    <div id="poison-vignette"></div>
+    <div id="starve-vignette"></div>
+
+    <!-- 縦向き警告オーバーレイ（スマホプレイ中） -->
+    <div id="orientation-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
+      <div class="dusk-panel rounded-3xl max-w-sm w-full p-6 text-center">
+        <div class="text-4xl mb-3">📱↻</div>
+        <h2 class="text-lg font-extrabold text-amber-100 mb-2">横画面にしてプレイしてください</h2>
+        <p class="text-xs text-amber-200/80 leading-relaxed mb-4">
+          端末を横向きにするか、下のボタンから全画面＋横向きに切り替えてください。
+        </p>
+        <button id="btn-rotate-fullscreen" class="btn-amber w-full rounded-xl py-3 px-4 text-xs font-bold text-amber-50 cursor-pointer">
+          全画面＋横向きにする
+        </button>
+      </div>
+    </div>
+
+    <!-- 開始3カウントオーバーレイ -->
+    <div id="countdown-overlay" class="hidden fixed inset-0 pointer-events-none z-25 flex flex-col items-center justify-center">
+      <div id="countdown-number" class="font-serif-jp text-7xl sm:text-8xl font-extrabold text-amber-100 drop-shadow-[0_6px_28px_rgba(0,0,0,0.9)] tracking-wider">
+        3
+      </div>
+      <div id="countdown-sub" class="mt-3 dusk-panel rounded-full px-5 py-1.5 text-xs sm:text-sm font-bold text-amber-200 border-amber-400/50">
+        準備中...
+      </div>
+    </div>
+
+    <!-- 人間用クロスヘア -->
+    <div id="crosshair" class="hidden"></div>
+
+    <!-- スプレー補充スポット 画面ガイド（残量30%以下で表示） -->
+    <div id="refill-guide" class="hidden fixed pointer-events-none z-20 -translate-x-1/2 -translate-y-1/2">
+      <div class="dusk-panel rounded-full px-3 py-1 text-[11px] font-bold text-amber-200 border-amber-400/60 flex items-center gap-1.5 whitespace-nowrap">
+        <span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+        <span>補充缶 <span id="refill-guide-dist">0.0m</span></span>
+      </div>
+    </div>
+
+    <!-- スプレー補充プロンプト＆長押し進捗バー -->
+    <div id="refill-prompt" class="hidden fixed left-1/2 top-[60%] -translate-x-1/2 pointer-events-none z-20">
+      <div class="dusk-panel rounded-2xl px-4 py-2 text-center min-w-[200px] border-amber-400/50">
+        <div id="refill-prompt-text" class="text-xs font-bold text-amber-100">
+          [E] 長押しでスプレー補充
+        </div>
+        <div id="refill-progress-wrap" class="hidden w-full h-2 bg-black/55 rounded-full overflow-hidden border border-amber-300/30 mt-1.5">
+          <div id="refill-progress-bar" class="h-full bg-gradient-to-r from-amber-500 to-lime-300" style="width: 0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 方向インジケーター群コンテナ -->
+    <div id="indicator-layer" class="fixed inset-0 pointer-events-none z-10"></div>
+
+    <!-- ==================== HUD ==================== -->
+    <div id="hud" class="hidden fixed inset-0 pointer-events-none z-20 p-4 sm:p-6 flex flex-col justify-between">
+      <!-- 上部バー：タイマー・残存数・人間数・MENU -->
+      <div class="flex items-start justify-between gap-2">
+        <div id="hud-top-left" class="dusk-panel rounded-2xl px-4 py-2.5 flex items-center gap-3">
+          <div id="hud-role-badge" class="px-2.5 py-1 rounded-lg text-[11px] font-bold tracking-wider bg-amber-600/30 border border-amber-400/40 text-amber-200">
+            人間 (FPS)
+          </div>
+          <div class="flex items-center gap-3">
+            <div>
+              <div class="text-[10px] text-amber-200/70">残存ゴキブリ</div>
+              <div id="hud-roach-count" class="text-sm sm:text-lg font-extrabold text-amber-100">3 / 3</div>
+            </div>
+            <div class="border-l border-amber-200/20 pl-3">
+              <div class="text-[10px] text-amber-200/70">人間</div>
+              <div id="hud-human-count" class="text-sm sm:text-lg font-extrabold text-amber-200">1人</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="hud-timer-box" class="dusk-panel rounded-2xl px-5 py-2 text-center min-w-[126px]">
+          <div id="hud-net-tag" class="text-[9px] tracking-[0.18em] text-amber-200/70 uppercase">Time Left</div>
+          <div id="hud-timer" class="text-2xl sm:text-3xl font-extrabold font-serif-jp text-amber-100 tracking-wider">
+            02:00
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <div id="hud-quick-tip-wrap" class="dusk-panel rounded-2xl px-4 py-2.5 text-right hidden md:block">
+            <div class="text-[11px] text-amber-200/70">ESC でメニュー</div>
+            <div id="hud-quick-tip" class="text-xs text-amber-100/90 mt-0.5">
+              左クリック: 新聞紙 / 右クリック: スプレー
+            </div>
+          </div>
+          <button id="btn-hud-pause" class="pointer-events-auto dusk-panel rounded-xl px-3 py-2 text-xs font-bold text-amber-100 border-amber-300/40 cursor-pointer">
+            MENU
+          </button>
+        </div>
+      </div>
+
+      <!-- 中央通知トースト＆観戦切替バー -->
+      <div class="flex flex-col items-center gap-2">
+        <div id="hud-toast" class="transition-all duration-300 opacity-0 -translate-y-2">
+          <div class="dusk-panel rounded-full px-4 py-1.5 text-xs sm:text-sm font-semibold text-amber-100 border-amber-400/50">
+            <span id="hud-toast-text"></span>
+          </div>
+        </div>
+
+        <div id="spectate-bar" class="hidden pointer-events-auto dusk-panel rounded-2xl px-4 py-2 flex items-center gap-3 border-rose-400/45">
+          <span class="text-xs font-bold text-rose-200">観戦中: <span id="spectate-target-name" class="text-amber-100">ゴキブリ #1</span></span>
+          <button id="btn-spectate-next" class="btn-amber rounded-lg px-3 py-1 text-[11px] font-bold text-amber-50 cursor-pointer">
+            次の仲間へ切替
+          </button>
+        </div>
+      </div>
+
+      <!-- 下部バー：陣営別ゲージ＆操作ガイド -->
+      <div class="flex items-end justify-between gap-4">
+        <div id="hud-status-box" class="dusk-panel rounded-2xl p-3.5 w-80 max-w-[85vw]">
+          <!-- 人間HUD -->
+          <div id="hud-human-bars" class="hidden space-y-2">
+            <div>
+              <div class="flex justify-between text-[11px] mb-0.5">
+                <span id="hud-spray-label" class="text-amber-200/90 font-semibold">ゴキジェット残量 (足止め用)</span>
+                <span id="hud-spray-val" class="text-amber-100 font-bold">100%</span>
+              </div>
+              <div class="w-full h-2 bg-black/50 rounded-full overflow-hidden border border-amber-200/20">
+                <div id="hud-spray-bar" class="h-full bg-gradient-to-r from-emerald-500 to-lime-300 transition-all duration-75" style="width: 100%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] mb-0.5">
+                <span class="text-sky-200/90 font-semibold">スタミナ (ダッシュ・ジャンプ)</span>
+                <span id="hud-human-stamina-val" class="text-amber-100 font-bold">100%</span>
+              </div>
+              <div class="w-full h-1.5 bg-black/50 rounded-full overflow-hidden border border-amber-200/20">
+                <div id="hud-human-stamina-bar" class="h-full bg-gradient-to-r from-sky-500 to-cyan-300 transition-all duration-75" style="width: 100%"></div>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] text-amber-100/75 pt-1 border-t border-amber-200/15">
+              <span id="hud-human-stance">姿勢: 立ち</span>
+              <span class="hud-pc-only">E長押し: 補充缶で補充</span>
+            </div>
+          </div>
+
+          <!-- ゴキブリHUD（4本ゲージ：体力・空腹・統合スタミナ・独立飛行ゲージ） -->
+          <div id="hud-roach-bars" class="hidden space-y-1.5">
+            <div>
+              <div class="flex justify-between text-[11px] mb-0.5">
+                <span class="text-rose-200/90 font-semibold">体力 (HP)</span>
+                <span id="hud-hp-val" class="text-amber-100 font-bold">100 / 100</span>
+              </div>
+              <div class="w-full h-2 bg-black/50 rounded-full overflow-hidden border border-amber-200/20">
+                <div id="hud-hp-bar" class="h-full bg-gradient-to-r from-rose-600 to-amber-400 transition-all duration-100" style="width: 100%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] mb-0.5">
+                <span class="text-amber-200/90 font-semibold">空腹 (家具上は大回復)</span>
+                <span id="hud-hunger-val" class="text-amber-100 font-bold">100%</span>
+              </div>
+              <div class="w-full h-1.5 bg-black/50 rounded-full overflow-hidden border border-amber-200/20">
+                <div id="hud-hunger-bar" class="h-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-100" style="width: 100%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] mb-0.5">
+                <span id="hud-stamina-label" class="text-sky-200/90 font-semibold">スタミナ (走・壁登り)</span>
+                <span id="hud-stamina-val" class="text-amber-100 font-bold">100%</span>
+              </div>
+              <div class="w-full h-1.5 bg-black/50 rounded-full overflow-hidden border border-amber-200/20">
+                <div id="hud-stamina-bar" class="h-full bg-gradient-to-r from-sky-500 to-cyan-300 transition-all duration-75" style="width: 100%"></div>
+              </div>
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] mb-0.5">
+                <span id="hud-fly-label" class="text-teal-200/90 font-semibold">飛行ゲージ</span>
+                <span id="hud-fly-val" class="text-amber-100 font-bold">100%</span>
+              </div>
+              <div class="w-full h-1.5 bg-black/50 rounded-full overflow-hidden border border-amber-200/20">
+                <div id="hud-fly-bar" class="h-full bg-gradient-to-r from-cyan-400 to-amber-300 transition-all duration-75" style="width: 100%"></div>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-[10px] text-amber-100/75 pt-1 border-t border-amber-200/15">
+              <span id="hud-roach-state" class="truncate">状態: 床を移動中</span>
+              <span class="hud-pc-only shrink-0 ml-1">25%以上で再飛行可</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="hud-controls-detail-wrap" class="dusk-panel rounded-2xl px-4 py-3 text-[11px] text-amber-100/80 hidden sm:block max-w-xs">
+          <div id="hud-controls-detail" class="leading-relaxed"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== スマホ用タッチ操作UI ==================== -->
+    <div id="mobile-controls" class="hidden">
+      <div id="look-zone"></div>
+      <div id="joy-zone">
+        <div id="joy-base">
+          <div id="joy-knob"></div>
+        </div>
+      </div>
+
+      <!-- 人間用アクションボタン -->
+      <div id="mobile-human-btns" class="hidden">
+        <button id="mbtn-slap" class="m-act-btn fixed right-5 bottom-5 w-20 h-20 text-xs">
+          <span>新聞紙</span>
+          <span class="text-[9px] opacity-75">攻撃</span>
+        </button>
+        <button id="mbtn-spray" class="m-act-btn fixed right-28 bottom-6 w-16 h-16 text-[11px]">
+          <span>スプレー</span>
+          <span class="text-[9px] opacity-75">長押し</span>
+        </button>
+        <button id="mbtn-crouch" class="m-act-btn fixed right-6 bottom-28 w-14 h-14 text-[11px]">
+          <span>しゃがみ</span>
+        </button>
+        <button id="mbtn-jump-h" class="m-act-btn fixed right-24 bottom-24 w-12 h-12 text-[10px]">
+          <span>跳ぶ</span>
+        </button>
+        <button id="mbtn-refill" class="hidden m-act-btn fixed right-48 bottom-8 w-16 h-16 text-[11px] !bg-emerald-700/85 !border-emerald-300">
+          <span>補充</span>
+          <span class="text-[9px] opacity-90">長押し</span>
+        </button>
+      </div>
+
+      <!-- ゴキブリ用アクションボタン（ジャンプ＋空中長押し飛行対応） -->
+      <div id="mobile-roach-btns" class="hidden">
+        <button id="mbtn-jump-r" class="m-act-btn fixed right-6 bottom-6 w-20 h-20 text-xs">
+          <span id="mbtn-jump-r-label">ジャンプ</span>
+          <span id="mbtn-jump-r-sub" class="text-[9px] opacity-80">長押し飛行</span>
+        </button>
+        <button id="mbtn-sprint-r" class="m-act-btn fixed right-28 bottom-7 w-16 h-16 text-[11px]">
+          <span>ダッシュ</span>
+          <span class="text-[9px] opacity-75">長押し</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ==================== タイトル画面 ==================== -->
+    <div id="title-screen" class="fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-4 bg-gradient-to-b from-black/45 via-black/25 to-black/65">
+      <div class="dusk-panel rounded-3xl max-w-3xl w-full p-5 sm:p-7 max-h-[95vh] overflow-y-auto no-scrollbar">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <span class="px-3 py-1 rounded-full text-[11px] tracking-[0.18em] bg-amber-500/20 border border-amber-400/35 text-amber-200">
+            最大8人対戦・クロスプレイ対応
+          </span>
+          <button id="btn-fullscreen-landscape" class="rounded-xl px-3.5 py-1.5 text-xs font-bold bg-amber-500/25 hover:bg-amber-500/40 border border-amber-300/45 text-amber-100 cursor-pointer flex items-center gap-1.5">
+            <span>⛶</span><span>全画面＋横向き</span>
+          </button>
+        </div>
+
+        <div class="text-center mb-4">
+          <h1 class="text-2xl sm:text-4xl font-extrabold font-serif-jp text-amber-50 tracking-wide drop-shadow">
+            ゴキブリパニック！
+          </h1>
+          <p class="text-xs sm:text-sm text-amber-100/75 mt-1 max-w-xl mx-auto leading-relaxed">
+            開始3秒の猶予で散開し、120秒間駆除するか生き延びるか。ステージと陣営を選んで対戦開始。
+          </p>
+        </div>
+
+        <!-- ステージ選択セクション -->
+        <div class="mb-4">
+          <div class="text-[11px] font-bold tracking-widest text-amber-300/80 uppercase mb-2">ステージ選択</div>
+          <div id="stage-selector" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+        </div>
+
+        <!-- オフライン（ソロ）陣営選択カード -->
+        <div class="text-[11px] font-bold tracking-widest text-amber-300/80 uppercase mb-2">オフライン（ソロ対戦）</div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+          <button id="btn-start-human" class="dusk-card rounded-2xl p-4 text-left cursor-pointer group">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-base sm:text-lg font-extrabold text-amber-100 group-hover:text-amber-300 transition-colors">人間陣営（FPS）</span>
+              <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-amber-500/25 text-amber-200 border border-amber-400/30">1 vs 3 AI</span>
+            </div>
+            <p class="text-xs text-amber-100/75 leading-relaxed mb-2">
+              しゃがみスプレーで家具下から炙り出し、丸めた新聞紙の一撃で3匹を駆除せよ。
+            </p>
+            <ul class="text-[11px] text-amber-200/80 space-y-0.5 hidden sm:block">
+              <li>• <strong class="text-amber-100">開始3カウント</strong>：移動・攻撃ロック（見回しのみ可）</li>
+              <li>• <strong class="text-amber-100">右クリック</strong>：スプレー（継続照射で毒鈍足・家具貫通なし）</li>
+            </ul>
+          </button>
+
+          <button id="btn-start-roach" class="dusk-card rounded-2xl p-4 text-left cursor-pointer group">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-base sm:text-lg font-extrabold text-amber-100 group-hover:text-amber-300 transition-colors">ゴキブリ陣営（TPS）</span>
+              <span class="text-[11px] px-2.5 py-0.5 rounded-full bg-rose-500/25 text-rose-200 border border-rose-400/30">超マクロ視点</span>
+            </div>
+            <p class="text-xs text-amber-100/75 leading-relaxed mb-2">
+              最初の3秒で有利な家具へ逃げ込め。壁登りと独立ゲージの緊急飛行で120秒生き延びろ。
+            </p>
+            <ul class="text-[11px] text-amber-200/80 space-y-0.5 hidden sm:block">
+              <li>• <strong class="text-amber-100">家具側面へ前進</strong>：家具登攀（毒中でも登攀可）</li>
+              <li>• <strong class="text-amber-100">空中 Space 長押し</strong>：独立ゲージで緊急飛行（毒中でも可）</li>
+            </ul>
+          </button>
+        </div>
+
+        <!-- オンライン対戦セクション（最大8人・自由陣営） -->
+        <div class="rounded-2xl bg-black/30 border border-amber-300/25 p-3.5 mb-3">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+            <div class="flex items-center gap-2">
+              <span class="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span class="text-sm font-extrabold text-amber-100">オンライン対戦（最大8人・陣営自由選択）</span>
+            </div>
+            <span class="text-[11px] text-amber-200/75">ロビーで人間／ゴキブリ自由切替＆AI補充ON/OFF対応</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+            <button id="btn-create-room" class="btn-amber rounded-xl py-2.5 px-4 text-xs sm:text-sm font-bold text-amber-50 cursor-pointer">
+              選択ステージでルーム作成（ホスト）
+            </button>
+            <div class="flex items-center gap-2">
+              <input id="input-room-code" type="text" inputmode="numeric" maxlength="4" placeholder="4桁コード" class="w-full rounded-xl bg-black/45 border border-amber-300/30 px-3 py-2.5 text-sm font-bold tracking-[0.25em] text-center text-amber-100 placeholder-amber-200/40 focus:outline-none focus:border-amber-400" />
+              <button id="btn-join-room" class="shrink-0 rounded-xl py-2.5 px-4 text-xs sm:text-sm font-bold text-amber-100 bg-white/10 hover:bg-white/20 border border-amber-300/35 transition cursor-pointer">
+                参加する
+              </button>
+            </div>
+          </div>
+          <div id="online-error-msg" class="hidden mt-2 text-xs text-rose-300 font-semibold"></div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[10px] text-amber-200/65 border-t border-amber-200/15 pt-3">
+          <span>PC: WASD＋マウス / スマホ: 左スティック＋右ドラッグ視点</span>
+          <span>ホーム画面に追加で全画面アプリ起動（PWA対応）</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== オンライン待機ロビー画面（最大8人・自由陣営） ==================== -->
+    <div id="lobby-screen" class="hidden fixed inset-0 z-30 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div class="dusk-panel rounded-3xl max-w-xl w-full p-5 sm:p-6 max-h-[94vh] overflow-y-auto no-scrollbar">
+        <div class="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <div class="text-[10px] tracking-[0.22em] text-amber-300/80 uppercase">Online Lobby (Max 8)</div>
+            <h2 class="text-xl sm:text-2xl font-extrabold font-serif-jp text-amber-50">対戦待機ロビー</h2>
+            <div id="lobby-stage-name" class="text-xs text-amber-200/80 mt-0.5">ステージ: -</div>
+          </div>
+          <div class="text-right">
+            <div class="text-[10px] text-amber-200/70">ルームコード</div>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span id="lobby-room-code" class="text-2xl font-extrabold tracking-[0.22em] text-amber-200">0000</span>
+              <button id="btn-copy-code" class="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500/25 hover:bg-amber-500/40 border border-amber-400/40 text-amber-100 cursor-pointer">
+                コピー
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 自分の陣営選択 -->
+        <div class="rounded-2xl bg-black/35 border border-amber-300/25 p-3 mb-3">
+          <div class="text-[11px] font-bold text-amber-200/85 mb-2">あなたの陣営を選択（人数上限なし）</div>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="btn-lobby-pick-human" class="rounded-xl py-2 px-3 text-xs font-extrabold border transition cursor-pointer">
+              人間陣営 (FPS)
+            </button>
+            <button id="btn-lobby-pick-roach" class="rounded-xl py-2 px-3 text-xs font-extrabold border transition cursor-pointer">
+              ゴキブリ陣営 (TPS)
+            </button>
+          </div>
+        </div>
+
+        <!-- ホスト用 AI補充 ON/OFF 設定 -->
+        <div id="lobby-ai-toggle-wrap" class="rounded-2xl bg-black/30 border border-amber-200/20 px-4 py-2.5 mb-3 flex items-center justify-between gap-2">
+          <div>
+            <div class="text-xs font-bold text-amber-100">空き枠のAI補充</div>
+            <div class="text-[10px] text-amber-200/70">ONで8人までAI自動補充 / OFFで参加者のみ</div>
+          </div>
+          <label class="inline-flex items-center gap-2 cursor-pointer">
+            <input id="chk-lobby-ai-fill" type="checkbox" checked class="w-4 h-4 accent-amber-500 cursor-pointer" />
+            <span id="lobby-ai-status-badge" class="text-xs font-extrabold text-emerald-300">ON</span>
+          </label>
+        </div>
+
+        <!-- 陣営カウント＆参加者一覧 -->
+        <div class="flex items-center justify-between text-xs text-amber-200/85 mb-2 px-1">
+          <span>参加中: <strong id="lobby-total-count" class="text-amber-100">1 / 8</strong></span>
+          <span>人間 <strong id="lobby-human-count" class="text-amber-300">1</strong> vs ゴキブリ <strong id="lobby-roach-count" class="text-rose-300">0</strong></span>
+        </div>
+
+        <div id="lobby-player-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4 max-h-44 overflow-y-auto no-scrollbar"></div>
+
+        <div id="lobby-start-hint" class="text-center text-xs text-amber-200/85 mb-4"></div>
+
+        <div class="flex flex-col gap-2.5">
+          <button id="btn-lobby-start" class="hidden btn-amber rounded-xl py-3 px-6 text-sm font-bold text-amber-50 cursor-pointer">
+            オンライン対戦を開始する
+          </button>
+          <button id="btn-lobby-leave" class="rounded-xl py-2.5 px-6 text-xs sm:text-sm font-semibold text-amber-200 bg-white/5 hover:bg-white/10 border border-amber-200/20 transition cursor-pointer">
+            ルームを退出してタイトルへ
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== ポーズ / メニュー画面 ==================== -->
+    <div id="pause-screen" class="hidden fixed inset-0 z-30 flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm">
+      <div class="dusk-panel rounded-3xl max-w-md w-full p-6 text-center">
+        <div class="text-xs tracking-[0.25em] text-amber-300/75 uppercase mb-1">Menu</div>
+        <h2 id="pause-title" class="text-2xl font-extrabold font-serif-jp text-amber-50 mb-2">一時停止中</h2>
+        <p id="pause-desc" class="text-xs text-amber-100/75 mb-4 leading-relaxed">
+          下のボタンから対戦に復帰できます。
+        </p>
+
+        <!-- 視点感度設定（スマホ・PC別に自動保存） -->
+        <div class="rounded-2xl bg-black/35 border border-amber-300/25 p-3.5 mb-5 text-left">
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <label id="look-sens-label" for="input-look-sens" class="text-xs font-bold text-amber-100">視点感度</label>
+            <div class="flex items-center gap-2">
+              <span id="look-sens-val" class="text-xs font-extrabold text-amber-300 tabular-nums">1.0x</span>
+              <button id="btn-reset-sens" type="button" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-white/10 hover:bg-white/20 border border-amber-300/30 text-amber-100 transition cursor-pointer">
+                標準 (1.0x)
+              </button>
+            </div>
+          </div>
+          <input id="input-look-sens" type="range" min="0.3" max="2.5" step="0.1" value="1.0" class="w-full accent-amber-500 cursor-pointer" />
+          <div class="flex justify-between text-[10px] text-amber-200/60 mt-1">
+            <span>遅め (0.3x)</span>
+            <span>標準 (1.0x)</span>
+            <span>速め (2.5x)</span>
+          </div>
+        </div>
+
+        <div class="flex flex-col gap-2.5">
+          <button id="btn-resume" class="btn-amber rounded-xl py-3 px-6 text-sm font-bold text-amber-50 cursor-pointer">
+            ゲームを再開する
+          </button>
+          <button id="btn-back-title" class="rounded-xl py-2.5 px-6 text-sm font-semibold text-amber-200 bg-white/5 hover:bg-white/10 border border-amber-200/20 transition cursor-pointer">
+            タイトル画面へ戻る
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== リザルト画面 ==================== -->
+    <div id="result-screen" class="hidden fixed inset-0 z-30 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div class="dusk-panel rounded-3xl max-w-lg w-full p-6 text-center">
+        <div id="result-badge" class="inline-block px-3.5 py-1 rounded-full text-xs font-bold tracking-widest mb-2 bg-amber-500/25 border border-amber-400/40 text-amber-200">
+          MATCH FINISHED
+        </div>
+        <h2 id="result-title" class="text-3xl font-extrabold font-serif-jp text-amber-50 mb-2">勝利！</h2>
+        <p id="result-desc" class="text-sm text-amber-100/80 mb-5 leading-relaxed"></p>
+
+        <div class="grid grid-cols-3 gap-3 mb-5 text-center">
+          <div class="rounded-xl bg-black/30 border border-amber-200/15 p-3">
+            <div class="text-[10px] text-amber-200/65">経過時間</div>
+            <div id="result-stat-time" class="text-lg font-bold text-amber-100 mt-0.5">00:00</div>
+          </div>
+          <div class="rounded-xl bg-black/30 border border-amber-200/15 p-3">
+            <div class="text-[10px] text-amber-200/65">駆除数</div>
+            <div id="result-stat-kills" class="text-lg font-bold text-amber-100 mt-0.5">0 / 3</div>
+          </div>
+          <div class="rounded-xl bg-black/30 border border-amber-200/15 p-3">
+            <div class="text-[10px] text-amber-200/65">吹っ飛ばした小物</div>
+            <div id="result-stat-props" class="text-lg font-bold text-amber-100 mt-0.5">0</div>
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-3 justify-center">
+          <button id="btn-retry" class="btn-amber rounded-xl py-3 px-7 text-sm font-bold text-amber-50 cursor-pointer">
+            同じ陣営でもう一度
+          </button>
+          <button id="btn-result-title" class="rounded-xl py-3 px-6 text-sm font-semibold text-amber-200 bg-white/5 hover:bg-white/10 border border-amber-200/20 transition cursor-pointer">
+            タイトルへ戻る
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
